@@ -1,0 +1,239 @@
+# Define log file path
+$logFilePath = "C:\ServiceNinjaLog.txt"
+
+# Categorize services into comprehensive lists
+
+# Insecure Services: Services that expose security vulnerabilities.
+$insecureServices = @(
+    "TermService", "RemoteAccess", "SNMP", "Telnet", "upnphost", "SSDPSRV", 
+    "WinRM", "RemoteRegistry", "Messenger", "WcnSvc", "IKEEXT", "PolicyAgent", 
+    "LanmanServer", "LanmanWorkstation", "Netlogon", "RemoteAssistance", "RpcSs", "wuauserv"
+)
+
+# Unimportant/Non-Essential Services: Safe to stop or disable for better performance.
+$nonEssentialServices = @(
+    "Fax", "WSearch", "Spooler", "Themes", "WaaSMedicSvc", "SysMain", 
+    "seclogon", "TabletInputService", "WerSvc", "PcaSvc", "SCardSvr", 
+    "DiagTrack", "MapsBroker", "HomeGroupProvider", "HomeGroupListener", 
+    "WalletService", "InstallService", "ConnectedUserExperiencesAndTelemetry", "OneSyncSvc", "PrintNotify"
+)
+
+# Useless/Obsolete Services: Can be safely disabled or stopped as they're no longer relevant.
+$obsoleteServices = @(
+    "dmwappushservice", "RetailDemo", "RemoteDesktopServices", "bthserv", 
+    "TrkWks", "SCardSvr", "ScDeviceEnum", "WbioSrvc", "WebClient"
+)
+
+# Critical Services: Only restart or enable them if they cause errors or system instability.
+$criticalServices = @(
+    "EventLog", "RpcSs", "LanmanWorkstation", "LanmanServer", "wuauserv", "WinRM"
+)
+
+# Function to write log
+function Write-Log {
+    param ([string]$message)
+    Add-Content -Path $logFilePath -Value "$(Get-Date) : $message"
+}
+
+# Function for progress reporting
+function Report-Progress {
+    param ([string]$activity, [string]$status, [int]$percentComplete)
+    Write-Progress -Activity $activity -Status $status -PercentComplete $percentComplete
+}
+
+# Function to check if a service exists
+function Service-Exists {
+    param ([string]$serviceName)
+    return Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+}
+
+# Function to stop services
+function Stop-Services {
+    param ([string[]]$services)
+    Write-Host "Stopping services..."
+    $counter = 0
+    $totalServices = $services.Count
+    foreach ($service in $services) {
+        if (Service-Exists $service) {
+            try {
+                $svc = Get-Service -Name $service
+                if ($svc.Status -eq 'Running') {
+                    Stop-Service -Name $service -Force -ErrorAction SilentlyContinue
+                    Write-Host "Stopped service: $service"
+                    Write-Log "Stopped service: $service"
+                } else {
+                    Write-Host "Service not running: $service"
+                    Write-Log "Service not running: $service"
+                }
+            } catch {
+                Write-Host "Error stopping service: $service. Error: $_"
+                Write-Log "Error stopping service: $service. Error: $_"
+            }
+        } else {
+            Write-Log "Service not found: $service"
+            Write-Host "Service not found: $service"
+        }
+        $counter++
+        Report-Progress "Stopping Services" "Processing $service" (($counter / $totalServices) * 100)
+    }
+}
+
+# Function to disable services
+function Disable-Services {
+    param ([string[]]$services)
+    Write-Host "Disabling services..."
+    $counter = 0
+    $totalServices = $services.Count
+    foreach ($service in $services) {
+        if (Service-Exists $service) {
+            try {
+                Set-Service -Name $service -StartupType Disabled -ErrorAction SilentlyContinue
+                Write-Host "Disabled service: $service"
+                Write-Log "Disabled service: $service"
+            } catch {
+                Write-Host "Service not found or cannot be disabled: $service. Error: $_"
+                Write-Log "Service not found or cannot be disabled: $service. Error: $_"
+            }
+        } else {
+            Write-Log "Service not found: $service"
+            Write-Host "Service not found: $service"
+        }
+        $counter++
+        Report-Progress "Disabling Services" "Processing $service" (($counter / $totalServices) * 100)
+    }
+}
+
+# Function to backup current service states
+function Backup-Services {
+    $backup = @()
+    foreach ($service in $insecureServices + $nonEssentialServices + $obsoleteServices) {
+        if (Service-Exists $service) {
+            try {
+                $svc = Get-Service -Name $service
+                $backup += [PSCustomObject]@{ Name = $service; Status = $svc.Status.ToString(); StartType = (Get-WmiObject -Class Win32_Service -Filter "Name='$service'").StartMode }
+            } catch {
+                Write-Log "Service not found: $service"
+            }
+        } else {
+            Write-Log "Service not found: $service"
+        }
+    }
+
+    $savePath = "C:\ServiceNinjaBackup.csv"
+    $backup | Export-Csv -Path $savePath -NoTypeInformation
+    Write-Log "Backup completed and saved at $savePath"
+    Write-Host "Backup saved at $savePath"
+}
+
+# Function to run a system health check
+function Run-Health-Check {
+    Write-Host "Running system health check..."
+    $healthCheckResults = "C:\ServiceNinjaHealthCheck.txt"
+    sfc /scannow | Out-File -FilePath $healthCheckResults -Append
+    DISM /Online /Cleanup-Image /CheckHealth | Out-File -FilePath $healthCheckResults -Append
+    DISM /Online /Cleanup-Image /ScanHealth | Out-File -FilePath $healthCheckResults -Append
+    Write-Host "System health check completed. Results saved to $healthCheckResults"
+    Write-Log "System health check completed. Results saved to $healthCheckResults"
+    Restart-CriticalServices
+}
+
+# Function to check and ensure dependent services are running
+function Ensure-DependentServicesRunning {
+    param ([string]$serviceName)
+    $svc = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+
+    if ($svc -and $svc.DependentServices.Count -gt 0) {
+        foreach ($depSvc in $svc.DependentServices) {
+            if ($depSvc.Status -ne 'Running') {
+                Start-Service -Name $depSvc.Name -ErrorAction SilentlyContinue
+                Write-Log "Started dependent service: $($depSvc.Name)"
+                Write-Host "Started dependent service: $($depSvc.Name)"
+            }
+        }
+    }
+}
+
+# Function to restart or enable critical services if necessary
+function Restart-CriticalServices {
+    Write-Host "Checking and restarting critical services if needed..."
+    foreach ($service in $criticalServices) {
+        if (Service-Exists $service) {
+            try {
+                Ensure-DependentServicesRunning -serviceName $service
+                
+                $svc = Get-Service -Name $service
+                # Set the startup type to Automatic if it's not already
+                if ($svc.StartType -ne 'Automatic') {
+                    Set-Service -Name $service -StartupType Automatic -ErrorAction SilentlyContinue
+                    Write-Log "Set startup type to Automatic for: $service"
+                }
+
+                # Check and restart the service if it's not running
+                if ($svc.Status -ne 'Running') {
+                    Start-Service -Name $service -ErrorAction Stop
+                    Write-Log "Started critical service: $service"
+                    Write-Host "Started critical service: $service"
+                } else {
+                    Write-Host "Critical service already running: $service"
+                }
+
+            } catch {
+                Write-Log "Failed to restart or enable critical service: $service. Error: $_"
+                Write-Host "Failed to restart or enable critical service: $service. Error: $_"
+            }
+        } else {
+            Write-Log "Service not found: $service"
+            Write-Host "Service not found: $service"
+        }
+    }
+}
+
+# Function to find and report missing services
+function Check-Missing-Services {
+    param ([string[]]$services)
+    Write-Host "Checking for missing services..."
+    foreach ($service in $services) {
+        if (-not (Service-Exists $service)) {
+            Write-Log "Service missing or not installed: $service"
+            Write-Host "Service missing or not installed: $service"
+        }
+    }
+}
+
+# Log rotation to avoid large log files
+function Rotate-Log {
+    $maxLogSize = 5MB
+    
+    # Check if the log file exists; if not, create it
+    if (-Not (Test-Path -Path $logFilePath)) {
+        New-Item -Path $logFilePath -ItemType File -Force
+        Write-Log "Log file created at $logFilePath"
+    }
+
+    $logFileSize = (Get-Item $logFilePath).Length
+
+    if ($logFileSize -gt $maxLogSize) {
+        Rename-Item -Path $logFilePath -NewName "$logFilePath.$(Get-Date -Format 'yyyyMMddHHmmss').log"
+        Write-Host "Log file rotated."
+        Write-Log "Log file rotated."
+        # Create a new log file after rotating
+        New-Item -Path $logFilePath -ItemType File -Force
+        Write-Log "New log file created after rotation at $logFilePath"
+    }
+}
+
+# Main script execution
+function Main {
+    Rotate-Log
+    Write-Host "Starting comprehensive service management and system health check..."
+    Backup-Services
+    Stop-Services -services $insecureServices + $nonEssentialServices + $obsoleteServices
+    Disable-Services -services $insecureServices + $nonEssentialServices + $obsoleteServices
+    Run-Health-Check
+    Check-Missing-Services -services $insecureServices + $nonEssentialServices + $obsoleteServices
+    Write-Host "Service management completed. Detailed log saved at $logFilePath"
+    Write-Log "Service management and health check completed."
+}
+
+# Run the main function
+Main
