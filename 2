@@ -1,0 +1,169 @@
+# Define log file path
+$logFilePath = "C:\ServiceNinjaLog.txt"
+
+# Categorize services into comprehensive lists
+
+# Essential Services
+$essentialServices = @(
+    "System Events Notification Service", "RPC Endpoint Mapper", "Remote Procedure Call (RPC) Service",
+    "Remote Registry", "Server", "TCP/IP NetBIOS Helper", "Windows Audio Endpoint Builder",
+    "Windows Audio", "Windows Event Log", "Windows Management Instrumentation", "Windows Time",
+    "Workstation", "DNS Client", "DHCP Client", "IP Helper", "TCP/IP NetBIOS Helper", "Winsock",
+    "Security Center", "Windows Defender Firewall Service", "Windows Firewall", "Windows Defender Antivirus Service",
+    "Windows Security Center", "BitLocker Drive Encryption Service", "Credential Manager", "Smart Card"
+)
+
+# Optional or Application-Specific Services
+$optionalServices = @(
+    "Background Intelligent Transfer Service (BITS)", "Internet Explorer", "Microsoft Edge", "ClipBook",
+    "Fax Service", "Function Discovery Resource Publication Service", "Messenger", "NetMeeting Remote Desktop Sharing",
+    "Print Spooler", "Secondary Logon", "Telnet", "Themes", "UPS", "WebClient", "Windows Error Reporting Service",
+    "Windows Image Acquisition (WIA)", "Windows Search", "Windows Update", ".NET Framework Services",
+    "SQL Server Services", "IIS World Wide Web Publishing Service", "Other application-specific services"
+)
+
+# Unnecessary or Legacy Services
+$obsoleteServices = @(
+    "Telnet", "Messenger", "WcnSvc", "RemoteAssistance", "TabletInputService", "HomeGroupProvider",
+    "HomeGroupListener", "ConnectedUserExperiencesAndTelemetry", "FTP Server", "SMB",
+    "Remote Desktop Session Manager", "Remote Desktop Licensing Service", "Routing and Remote Access",
+    "IpxlatCfgSvc", "NcdAutoSetup", "Netman", "NcaSvc", "XboxNetApiSvc", "jhi_service",
+    "NetSetupSvc", "msiserver", "MixedRealityOpenXRSvc", "MicrosoftEdgeElevationService",
+    "McpManagementService", "MapsBroker", "lltdsvc", "dot3svc", "EapHost", "Wecsvc", "uhssvc",
+    "VBoxSDS", "webthreatdefusersvc_cca78d", "PrintWorkflowUserSvc_cca78d", "P9RdrService_cca78d",
+    "DevicesFlowUserSvc_cca78d", "DevicePickerUserSvc_cca78d", "DeviceAssociationBrokerSvc_cca78d",
+    "CredentialEnrollmentManagerUserSvc_cca78d", "ConsentUxUserSvc_cca78d", "CaptureService_cca78d",
+    "BluetoothUserService_cca78d", "BcastDVRUserService_cca78d", "XblGameSave", "XblAuthManager",
+    "wlpasvc", "WwanSvc", "wuauserv", "WsDrvInst", "WsAppService3", "WPDBusEnum", "WManSvc",
+    "wlidsvc", "wisvc", "WiaRpc", "WFDSConMgrSvc", "WEPHOSTSVC", "webthreatdefusersvc", "wcncsvc",
+    "icssvc", "WbioSrvc", "WAS", "WaaSMedicSvc", "VSS", "vds", "VacSvc", "TroubleshootingSvc",
+    "UmRdpService", "Fax", "NaturalAuthentication", "swprv", "StiSvc", "AppXSvc", "sppsvc",
+    "spectrum", "SmsRouter", "smphost", "shpamsvc", "SharedRealitySvc", "SgrmBroker", "SessionEnv",
+    "SEMgrSvc", "SCPolicySvc", "MSDTC", "Browser", "KtmRm", "QWAVE", "PushToInstall", "PrintWorkflowUserSvc",
+    "PrintNotify", "pla", "PhoneSvc", "PerfHost", "perceptionsimulation", "P9RdrService", "upnphost",
+    "SSDPSRV", "PerceptionSimulation"
+)
+
+# Insecure Services: Services that expose security vulnerabilities.
+$insecureServices = @(
+    "TermService", "RemoteAccess", "SNMP", "Telnet", "upnphost", "SSDPSRV",
+    "WinRM", "RemoteRegistry", "Messenger", "WcnSvc", "IKEEXT", "PolicyAgent",
+    "LanmanServer", "LanmanWorkstation", "Netlogon", "RemoteAssistance", "RpcSs", "wuauserv"
+)
+
+# Function to write log
+function Write-Log {
+    param ([string]$message)
+    Add-Content -Path <span class="math-inline">logFilePath \-Value "</span>(Get-Date) : $message"
+}
+
+# Function for progress reporting
+function Report-Progress {
+    param ([string]$activity, [string]$status, [int]$percentComplete)
+    Write-Progress -Activity $activity -Status $status -PercentComplete $percentComplete
+}
+
+# Function to check if a service exists
+function Service-Exists {
+    param ([string]$serviceName)
+    return Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+}
+
+# Function to stop services
+function Stop-Services {
+    param ([string[]]$services)
+    Write-Host "Stopping services..."
+    $counter = 0
+    $totalServices = $services.Count
+    foreach ($service in $services) {
+        if (Service-Exists $service) {
+            try {
+                $svc = Get-Service -Name $service
+                if ($svc.Status -eq 'Running') {
+                    Write-Host "Stopping service: $service"
+                    Write-Log "Stopping service: $service"
+                    Stop-Service -Name $service -Force
+                } else {
+                    Write-Host "Service $service is already stopped."
+                    Write-Log "Service $service is already stopped."
+                }
+            } catch [Exception] {
+                Write-Warning "Error stopping service $service: $_"
+                Write-Log "Error stopping service $service: $_"
+            }
+        } else {
+            Write-Host "Service $service not found."
+            Write-Log "Service $service not found."
+        }
+        $counter++
+        Report-Progress "Stopping Services" "Processing $service" (($counter / $totalServices) * 100)
+    }
+}
+
+# Function to disable services
+function Disable-Services {
+    param ([string[]]$services)
+    Write-Host "Disabling services..."
+    $counter = 0
+    $totalServices = $services.Count
+    foreach ($service in $services) {
+        if (Service-Exists $service) {
+            try {
+                Set-Service -Name $service -StartupType Disabled -ErrorAction SilentlyContinue
+                Write-Host "Disabled service: $service"
+                Write-Log "Disabled service: $service"
+            } catch {
+                Write-Host "Service not found or cannot be disabled: $service. Error: $_"
+                Write-Log "Service not found or cannot be disabled: $service. Error: $_"
+            }
+        } else {
+            Write-Log "Service not found: $service"
+            Write-Host "Service not found: $service"
+        }
+        $counter++
+        Report-Progress "Disabling Services" "Processing $service" (($counter / $totalServices) * 100)
+    }
+}
+
+# Function to enable services
+function Enable-Services {
+    param ([string[]]$services)
+    Write-Host "Enabling services..."
+    $counter = 0
+    $totalServices = $services.Count
+    foreach ($service in $services) {
+        if (Service-Exists $service) {
+            try {
+                Set-Service -Name $service -StartupType Automatic -ErrorAction SilentlyContinue
+                Start-Service -Name $service
+                Write-Host "Enabled service: $service"
+                Write-Log "Enabled service: $service"
+            } catch {
+                Write-Host "Error enabling service $service: $_"
+                Write-Log "Error enabling service $service: $_"
+            }
+        } else {
+            Write-Log "Service not found: $service"
+            Write-Host "Service not found: $service"
+        }
+        $counter++
+        Report-Progress "Enabling Services" "Processing $service" (($counter / $totalServices) * 100)
+    }
+}
+
+# Function to start services
+function Start-Services {
+    param ([string[]]$services)
+    Write-Host "Starting services..."
+    $counter = 0
+    $totalServices = $services.Count
+    foreach ($service in $services) {
+        if (Service-Exists $service) {
+            try {
+                Start-Service -Name $service
+                Write-Host "Started service: $service"
+                Write-Log "Started service: $service"
+            } catch {
+                Write-Host "Error starting service $service: $_"
+                Write-Log "Error starting service $service: $_"
+            }
