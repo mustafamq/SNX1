@@ -1,0 +1,141 @@
+# Define log file path (configurable)
+$logFilePath = "C:\ServiceNinjaLog.txt"
+
+# Function to write log
+function Write-Log {
+    param ([string]$message)
+    Add-Content -Path $logFilePath -Value "$(Get-Date) : $message"
+}
+
+# Function to rotate log file
+function Rotate-Log {
+    $maxLogSize = 5MB
+
+    if (-Not (Test-Path -Path $logFilePath)) {
+        New-Item -Path $logFilePath -ItemType File -Force
+        Write-Log "Log file created at $logFilePath"
+    }
+
+    $logFileSize = (Get-Item $logFilePath).Length
+
+    if ($logFileSize -gt $maxLogSize) {
+        Rename-Item -Path $logFilePath -NewName "$logFilePath.$(Get-Date -Format 'yyyyMMddHHmmss').log"
+        Write-Host "Log file rotated."
+        Write-Log "Log file rotated."
+        New-Item -Path $logFilePath -ItemType File -Force
+        Write-Log "New log file created after rotation at $logFilePath"
+    }
+}
+
+# Function to stop services
+function Stop-Services {
+    param ([string[]]$services)
+    foreach ($service in $services) {
+        try {
+            Stop-Service -Name $service -Force
+            Write-Host "Stopped service: $service"
+            Write-Log "Stopped service: $service"
+        } catch {
+            Write-Warning "Error stopping service: $service. Error: $_"
+            Write-Log "Error stopping service: $service. Error: $_"
+        }
+    }
+}
+
+# Function to disable services
+function Disable-Services {
+    param ([string[]]$services)
+    foreach ($service in $services) {
+        try {
+            Set-Service -Name $service -StartupType Disabled
+            Write-Host "Disabled service: $service"
+            Write-Log "Disabled service: $service"
+        } catch {
+            Write-Warning "Error disabling service: $service. Error: $_"
+            Write-Log "Error disabling service: $service. Error: $_"
+        }
+    }
+}
+
+# Function to backup current service states
+function Backup-Services {
+    $backupData = Get-WmiObject Win32_Service | Select-Object Name, Status, StartMode
+
+    $backupFile = "ServiceBackup_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv"
+    $backupData | Export-Csv -Path $backupFile -NoTypeInformation
+
+    Write-Log "Service configurations backed up to $backupFile"
+}
+
+# Function to run a system health check
+function Run-Health-Check {
+    $healthCheckResults = "C:\ServiceNinjaHealthCheck.txt"
+
+    # Basic health checks (adjust as needed)
+    Get-CimInstance Win32_Processor | Select-Object LoadPercentage | Format-Table -AutoSize | Out-File -FilePath $healthCheckResults -Append
+    Get-CimInstance Win32_PhysicalMemory | Select-Object @{Name="AvailableMemory"; Expression={$_.AvailableMemory / 1GB}}, @{Name="TotalPhysicalMemory"; Expression={$_.TotalPhysicalMemory / 1GB}} | Format-Table -AutoSize | Out-File -FilePath $healthCheckResults -Append
+
+    Write-Log "System health check completed. Results saved to $healthCheckResults"
+}
+
+# Function to check for missing services
+function Check-Missing-Services {
+    $missingServices = @( )
+    foreach ($service in $insecureServices + $nonEssentialServices + $obsoleteServices) {
+        if (-not (Get-Service -Name $service -ErrorAction SilentlyContinue)) {
+            $missingServices += $service
+        }
+    }
+
+    if ($missingServices.Count -gt 0) {
+        Write-Warning "Missing services:"
+        foreach ($service in $missingServices) {
+            Write-Warning "  - $service"
+        }
+        Write-Log "Missing services: $($missingServices -join ', ')"
+    } else {
+        Write-Log "All services found."
+    }
+}
+
+# Main function
+function Main {
+    Rotate-Log
+    Write-Host "Starting comprehensive service management and system health check..."
+
+    $confirmBackup = Get-Confirmation "Do you want to create a backup of current service configurations? (y/n):"
+    if ($confirmBackup -eq "y") {
+        Backup-Services
+    }
+
+    $confirmDisable = Get-Confirmation "Do you want to disable insecure, non-essential, and obsolete services? (y/n):"
+    if ($confirmDisable -eq "y") {
+        Stop-Services -services $insecureServices + $nonEssentialServices + $obsoleteServices -ErrorAction Stop
+        Disable-Services -services $insecureServices + $nonEssentialServices + $obsoleteServices -ErrorAction Stop
+    } else {
+        Write-Host "Skipping service disabling."
+    }
+
+    Run-Health-Check
+    Check-Missing-Services -services $insecureServices + $nonEssentialServices + $obsoleteServices
+
+    # Generate detailed service management report
+    Write-Host "Service management completed."
+    Write-Host "Stopped services:"
+    foreach ($service in $stoppedServices) {
+        Write-Host "  - $service.Name"
+    }
+    Write-Host "Disabled services:"
+    foreach ($service in $disabledServices) {
+        Write-Host "  - $service.Name"
+    }
+    Write-Host "Missing services:"
+    foreach ($service in $missingServices) {
+        Write-Host "  - $service"
+    }
+
+    Write-Log "Service management and health check completed."
+}
+
+# Run the main function
+Main
